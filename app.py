@@ -28,7 +28,6 @@ if uploaded_file is not None:
         if st.button("Processar Planilha"):
             df_novo = pd.DataFrame()
             
-            # Função auxiliar para buscar colunas tolerante a maiúsculas/minúsculas e espaços extras
             def find_column(df, target):
                 for col in df.columns:
                     if str(col).strip().lower() == target.strip().lower():
@@ -52,14 +51,33 @@ if uploaded_file is not None:
                 st.error(f"As seguintes colunas obrigatórias não foram encontradas na planilha: {', '.join(missing_cols)}")
                 st.info(f"Colunas disponíveis detetadas: {list(df_origem.columns)}")
             else:
+                # Filtrar para ignorar linhas a partir de onde aparece "GOODS SHIPPED INTO" em qualquer coluna
+                stop_index = None
+                for idx, row in df_origem.iterrows():
+                    for val in row.values:
+                        if val and "GOODS SHIPPED INTO" in str(val).upper():
+                            stop_index = idx
+                            break
+                    if stop_index is not None:
+                        break
+                
+                if stop_index is not None:
+                    df_origem_filtrado = df_origem.iloc[:stop_index].copy()
+                    st.info(f"Linhas abaixo de 'GOODS SHIPPED INTO' foram ignoradas (total de linhas válidas: {len(df_origem_filtrado)}).")
+                else:
+                    df_origem_filtrado = df_origem.copy()
+
                 # Preenchendo as colunas do novo formato solicitado
-                df_novo["invoice"] = df_origem[col_proforma]
-                df_novo["partnumber"] = df_origem[col_material]
-                df_novo["precototal"] = df_origem[col_amount]
-                df_novo["pesototal"] = df_origem[col_weight]
-                df_novo["quantidade"] = df_origem[col_qty]
+                df_novo["invoice"] = df_origem_filtrado[col_proforma]
+                df_novo["partnumber"] = df_origem_filtrado[col_material]
+                df_novo["precototal"] = df_origem_filtrado[col_amount]
+                df_novo["pesototal"] = df_origem_filtrado[col_weight]
+                df_novo["quantidade"] = df_origem_filtrado[col_qty]
                 df_novo["MOEDA"] = 790
                 df_novo["INCOTERMS"] = "FCA"
+
+                # Remove linhas vazias
+                df_novo = df_novo.dropna(subset=["invoice", "partnumber"], how="all")
 
                 st.success("Planilha processada com sucesso!")
                 st.subheader("Pré-visualização do Resultado Formatado")
