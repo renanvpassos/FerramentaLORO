@@ -4,30 +4,25 @@ import io
 
 st.set_page_config(page_title="Processador de Planilhas", page_icon="📊", layout="centered")
 
-st.title("📊 Processador de Planilhas para Importação")
-st.markdown("Faça o upload da planilha de origem para gerar o arquivo formatado conforme as regras especificadas.")
+st.title("📊 Processador de Múltiplas Planilhas para Importação")
+st.markdown("Faça o upload de uma ou mais planilhas de origem. Os dados serão consolidados em uma única tabela em sequência, sem linhas em branco.")
 
-uploaded_file = st.file_uploader("Envie a planilha de origem (Excel ou CSV)", type=["xlsx", "xls", "csv"])
+uploaded_files = st.file_uploader("Envie as planilhas de origem (Excel ou CSV)", type=["xlsx", "xls", "csv"], accept_multiple_files=True)
 
-if uploaded_file is not None:
+if uploaded_files:
     try:
-        # Lê o arquivo dependendo da extensão (cabeçalho começa na linha 14 -> header=13)
-        file_extension = uploaded_file.name.split('.')[-1].lower()
-        if file_extension in ['xlsx', 'xls']:
-            df_origem = pd.read_excel(uploaded_file, header=13)
-        elif file_extension == 'csv':
-            df_origem = pd.read_csv(uploaded_file, header=13)
-        else:
-            st.error("Formato de arquivo não suportado.")
-            st.stop()
+        all_dfs = []
+        
+        for uploaded_file in uploaded_files:
+            file_extension = uploaded_file.name.split('.')[-1].lower()
+            if file_extension in ['xlsx', 'xls']:
+                df_origem = pd.read_excel(uploaded_file, header=13)
+            elif file_extension == 'csv':
+                df_origem = pd.read_csv(uploaded_file, header=13)
+            else:
+                st.warning(f"Formato não suportado para o arquivo: {uploaded_file.name}")
+                continue
 
-        st.subheader("Pré-visualização dos dados brutos (Início na linha 14)")
-        st.dataframe(df_origem.head())
-
-        # Botão para processar
-        if st.button("Processar Planilha"):
-            df_novo = pd.DataFrame()
-            
             def find_column(df, target):
                 for col in df.columns:
                     if str(col).strip().lower() == target.strip().lower():
@@ -48,62 +43,71 @@ if uploaded_file is not None:
             if not col_qty: missing_cols.append("Packed Quantity")
 
             if missing_cols:
-                st.error(f"As seguintes colunas obrigatórias não foram encontradas na planilha: {', '.join(missing_cols)}")
-                st.info(f"Colunas disponíveis detetadas: {list(df_origem.columns)}")
-            else:
-                # Filtrar para ignorar linhas a partir de onde aparece "GOODS SHIPPED INTO" em qualquer coluna
-                stop_index = None
-                for idx, row in df_origem.iterrows():
-                    for val in row.values:
-                        if val and "GOODS SHIPPED INTO" in str(val).upper():
-                            stop_index = idx
-                            break
-                    if stop_index is not None:
+                st.error(f"O arquivo '{uploaded_file.name}' não possui as colunas: {', '.join(missing_cols)}")
+                st.stop()
+
+            # Filtrar para ignorar linhas a partir de onde aparece "GOODS SHIPPED INTO"
+            stop_index = None
+            for idx, row in df_origem.iterrows():
+                for val in row.values:
+                    if val and "GOODS SHIPPED INTO" in str(val).upper():
+                        stop_index = idx
                         break
-                
                 if stop_index is not None:
-                    df_origem_filtrado = df_origem.iloc[:stop_index].copy()
-                    st.info(f"Linhas abaixo de 'GOODS SHIPPED INTO' foram ignoradas (total de linhas válidas: {len(df_origem_filtrado)}).")
-                else:
-                    df_origem_filtrado = df_origem.copy()
+                    break
+            
+            if stop_index is not None:
+                df_origem_filtrado = df_origem.iloc[:stop_index].copy()
+            else:
+                df_origem_filtrado = df_origem.copy()
 
-                # Preenchendo as colunas do novo formato solicitado
-                df_novo["invoice"] = df_origem_filtrado[col_proforma]
-                df_novo["partnumber"] = df_origem_filtrado[col_material]
-                df_novo["precototal"] = df_origem_filtrado[col_amount]
-                df_novo["pesototal"] = df_origem_filtrado[col_weight]
-                df_novo["quantidade"] = df_origem_filtrado[col_qty]
-                df_novo["MOEDA"] = 790
-                df_novo["INCOTERMS"] = "FCA"
+            # Cria o DataFrame estruturado para este arquivo
+            df_novo = pd.DataFrame()
+            df_novo["invoice"] = df_origem_filtrado[col_proforma]
+            df_novo["partnumber"] = df_origem_filtrado[col_material]
+            df_novo["precototal"] = df_origem_filtrado[col_amount]
+            df_novo["pesototal"] = df_origem_filtrado[col_weight]
+            df_novo["quantidade"] = df_origem_filtrado[col_qty]
+            df_novo["MOEDA"] = 790
+            df_novo["INCOTERMS"] = "FCA"
 
-                # Remove linhas vazias
-                df_novo = df_novo.dropna(subset=["invoice", "partnumber"], how="all")
+            # Remove linhas totalmente vazias para evitar espaçamento
+            df_novo = df_novo.dropna(subset=["invoice", "partnumber"], how="all")
+            
+            if not df_novo.empty:
+                all_dfs.append(df_novo)
 
-                st.success("Planilha processada com sucesso!")
-                st.subheader("Pré-visualização do Resultado Formatado")
-                st.dataframe(df_novo.head(10))
+        if all_dfs:
+            # Concatena todos os dataframes em sequência, sem pular linhas
+            df_final = pd.concat(all_dfs, ignore_index=True)
 
-                # Opção de exportação para Excel
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df_novo.to_excel(writer, index=False, sheet_name='Tratado')
-                processed_data = output.getvalue()
+            st.success(f"Foram processados {len(uploaded_files)} arquivo(s) com sucesso! Total de linhas consolidadas: {len(df_final)}")
+            st.subheader("Pré-visualização do Resultado Consolidado")
+            st.dataframe(df_final.head(15))
 
-                st.download_button(
-                    label="📥 Baixar Planilha Tratada (.xlsx)",
-                    data=processed_data,
-                    file_name="planilha_tratada.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+            # Opção de exportação para Excel
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_final.to_excel(writer, index=False, sheet_name='Consolidado')
+            processed_data = output.getvalue()
 
-                # Opção de exportação para CSV
-                csv_data = df_novo.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Baixar Planilha Tratada (.csv)",
-                    data=csv_data,
-                    file_name="planilha_tratada.csv",
-                    mime="text/csv"
-                )
+            st.download_button(
+                label="📥 Baixar Planilha Consolidada (.xlsx)",
+                data=processed_data,
+                file_name="planilha_consolidada.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+            # Opção de exportação para CSV
+            csv_data = df_final.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Baixar Planilha Consolidada (.csv)",
+                data=csv_data,
+                file_name="planilha_consolidada.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning("Nenhum dado válido encontrado para consolidar nos arquivos enviados.")
 
     except Exception as e:
-        st.error(f"Ocorreu um erro ao processar o arquivo: {e}")
+        st.error(f"Ocorreu um erro ao processar os arquivos: {e}")
