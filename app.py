@@ -16,7 +16,6 @@ if uploaded_files:
         for uploaded_file in uploaded_files:
             file_extension = uploaded_file.name.split('.')[-1].lower()
             
-            # Carrega o arquivo bruto sem cabeçalho fixo
             if file_extension in ['xlsx', 'xls']:
                 df_raw = pd.read_excel(uploaded_file, header=None)
             elif file_extension == 'csv':
@@ -42,23 +41,18 @@ if uploaded_files:
                 for val in row.values:
                     if pd.notna(val):
                         val_str = str(val).strip().upper()
-                        if val_str.startswith("LORO PIANA S.p.A.") or "GOODS SHIPPED" in val_str:
+                        if val_str.startswith("LORO") or "GOODS SHIPPED" in val_str:
                             stop_points.append(idx)
                             break
 
-            # Processar blocos entre os cabeçalhos encontrados
             dfs_arquivo = []
             for i, h_idx in enumerate(header_indices):
                 start_row = h_idx + 1
-                
-                # Definir o limite de parada para este bloco específico
                 end_row = len(df_raw)
                 
-                # Se houver um próximo cabeçalho, o bloco atual cessa antes dele
                 if i + 1 < len(header_indices):
                     end_row = header_indices[i + 1]
                 
-                # Verificar se há alguma marca de parada (LORO ou GOODS SHIPPED) entre o start_row e o end_row
                 for s_idx in stop_points:
                     if start_row <= s_idx < end_row:
                         end_row = s_idx
@@ -67,10 +61,8 @@ if uploaded_files:
                 if start_row >= end_row:
                     continue
 
-                # Extrai o sub-dataframe usando a linha h_idx como cabeçalho
                 df_bloco = df_raw.iloc[start_row:end_row].copy()
                 
-                # Normaliza os nomes das colunas da linha de cabeçalho para evitar falhas por espaços
                 raw_headers = df_raw.iloc[h_idx].values
                 clean_headers = [str(col).strip() if pd.notna(col) else f"Unnamed_{c_idx}" for c_idx, col in enumerate(raw_headers)]
                 df_bloco.columns = clean_headers
@@ -87,8 +79,10 @@ if uploaded_files:
                 col_weight = find_column(df_bloco, "net weight in KG")
                 col_qty = find_column(df_bloco, "Packed Quantity")
 
+                # Se faltar alguma coluna, exibe um aviso detalhado para diagnóstico
                 if not (col_proforma and col_material and col_amount and col_weight and col_qty):
-                    continue  # Pula blocos que não contenham todas as colunas necessárias
+                    st.info(f"🔍 **Diagnóstico ({uploaded_file.name} - Bloco linha {h_idx+1})**: Colunas encontradas: {list(df_bloco.columns)}")
+                    continue
 
                 df_novo = pd.DataFrame()
                 df_novo["invoice"] = df_bloco[col_proforma]
@@ -99,7 +93,6 @@ if uploaded_files:
                 df_novo["MOEDA"] = 790
                 df_novo["INCOTERMS"] = "FCA"
 
-                # Remove linhas totalmente vazias ou que repetem o texto do cabeçalho
                 df_novo = df_novo.dropna(subset=["invoice", "partnumber"], how="all")
                 df_novo = df_novo[~df_novo["partnumber"].astype(str).str.lower().str.contains("material")]
 
@@ -110,7 +103,7 @@ if uploaded_files:
                 df_file_final = pd.concat(dfs_arquivo, ignore_index=True)
                 all_dfs.append(df_file_final)
             else:
-                st.warning(f"O arquivo '{uploaded_file.name}' possui cabeçalhos, mas os dados entre os limites estão vazios ou com nomes de colunas divergentes.")
+                st.warning(f"O arquivo '{uploaded_file.name}' encontrou o cabeçalho, mas os nomes das colunas não correspondem exatamente ao esperado.")
 
         if all_dfs:
             df_final = pd.concat(all_dfs, ignore_index=True)
@@ -119,7 +112,6 @@ if uploaded_files:
             st.subheader("Pré-visualização do Resultado Consolidado")
             st.dataframe(df_final.head(15))
 
-            # Opção de exportação para Excel
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_final.to_excel(writer, index=False, sheet_name='Consolidado')
@@ -132,7 +124,6 @@ if uploaded_files:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-            # Opção de exportação para CSV
             csv_data = df_final.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 Baixar Planilha Consolidada (.csv)",
