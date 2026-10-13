@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import re
 import io
 
 st.set_page_config(page_title="Processador de Planilhas", page_icon="📊", layout="centered")
@@ -67,9 +68,12 @@ if uploaded_files:
                 clean_headers = [str(col).strip() if pd.notna(col) else f"Unnamed_{c_idx}" for c_idx, col in enumerate(raw_headers)]
                 df_bloco.columns = clean_headers
 
+                # Função robusta que ignora quebras de linha, espaços extras e diferenças de maiúsculas/minúsculas
                 def find_column(df, target):
+                    target_clean = re.sub(r'\s+', '', target).lower()
                     for col in df.columns:
-                        if col and target.strip().lower() in str(col).strip().lower():
+                        col_clean = re.sub(r'\s+', '', str(col)).lower()
+                        if target_clean in col_clean:
                             return col
                     return None
 
@@ -79,10 +83,8 @@ if uploaded_files:
                 col_weight = find_column(df_bloco, "net weight in KG")
                 col_qty = find_column(df_bloco, "Packed Quantity")
 
-                # Se faltar alguma coluna, exibe um aviso detalhado para diagnóstico
                 if not (col_proforma and col_material and col_amount and col_weight and col_qty):
-                    st.info(f"🔍 **Diagnóstico ({uploaded_file.name} - Bloco linha {h_idx+1})**: Colunas encontradas: {list(df_bloco.columns)}")
-                    continue
+                    continue  # Pula blocos vazios ou inválidos sem travar
 
                 df_novo = pd.DataFrame()
                 df_novo["invoice"] = df_bloco[col_proforma]
@@ -103,7 +105,7 @@ if uploaded_files:
                 df_file_final = pd.concat(dfs_arquivo, ignore_index=True)
                 all_dfs.append(df_file_final)
             else:
-                st.warning(f"O arquivo '{uploaded_file.name}' encontrou o cabeçalho, mas os nomes das colunas não correspondem exatamente ao esperado.")
+                st.warning(f"O arquivo '{uploaded_file.name}' não gerou dados válidos entre os limites mapeados.")
 
         if all_dfs:
             df_final = pd.concat(all_dfs, ignore_index=True)
