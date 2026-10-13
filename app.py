@@ -16,7 +16,7 @@ if uploaded_files:
         for uploaded_file in uploaded_files:
             file_extension = uploaded_file.name.split('.')[-1].lower()
             
-            # Carrega o arquivo sem cabeçalho fixo para permitirmos a identificação dinâmica de múltiplos headers
+            # Carrega o arquivo bruto sem cabeçalho fixo
             if file_extension in ['xlsx', 'xls']:
                 df_raw = pd.read_excel(uploaded_file, header=None)
             elif file_extension == 'csv':
@@ -25,22 +25,19 @@ if uploaded_files:
                 st.warning(f"Formato não suportado para o arquivo: {uploaded_file.name}")
                 continue
 
-            # Função auxiliar para verificar valores em uma linha
-            def row_contains_terms(row, terms):
-                row_str_list = [str(val).strip().lower() for val in row.values if pd.notna(val)]
-                matches = sum(1 for term in terms if any(term in s for s in row_str_list))
-                return matches >= 2  # Considera cabeçalho se encontrar pelo menos 2 termos-chave
-
-            # Termos essenciais para identificar uma linha de cabeçalho
-            search_terms = ["proforma", "material", "amount in brl"]
+            # Função mais flexível para identificar linhas de cabeçalho
+            def is_header_row(row):
+                row_str = " ".join([str(val).strip().lower() for val in row.values if pd.notna(val)])
+                # Se a linha contiver os identificadores principais das colunas, é um cabeçalho
+                return "proforma" in row_str or "material" in row_str
 
             # Identificar todas as linhas que atuam como cabeçalho
             header_indices = []
             for idx, row in df_raw.iterrows():
-                if row_contains_terms(row, search_terms):
+                if is_header_row(row):
                     header_indices.append(idx)
 
-            # Se nenhum cabeçalho foi encontrado, tenta usar o comportamento padrão (ex: linha 13)
+            # Fallback de segurança: se não achar pelo texto, assume a linha 13 (padrão antigo) ou o início
             if not header_indices:
                 header_indices = [13] if len(df_raw) > 13 else [0]
 
@@ -57,10 +54,9 @@ if uploaded_files:
             # Processar blocos entre os cabeçalhos encontrados
             dfs_arquivo = []
             for i, h_idx in enumerate(header_indices):
-                # Onde o bloco começa (linha seguinte ao cabeçalho)
                 start_row = h_idx + 1
                 
-                # Onde o bloco termina (próximo cabeçalho ou o limite de 'GOODS SHIPPED')
+                # O bloco termina no próximo cabeçalho ou no limite de parada ("GOODS SHIPPED")
                 if i + 1 < len(header_indices):
                     end_row = header_indices[i + 1]
                 else:
@@ -108,10 +104,9 @@ if uploaded_files:
                 df_file_final = pd.concat(dfs_arquivo, ignore_index=True)
                 all_dfs.append(df_file_final)
             else:
-                st.warning(f"O arquivo '{uploaded_file.name}' não pôde ser mapeado corretamente com os cabeçalhos encontrados.")
+                st.warning(f"O arquivo '{uploaded_file.name}' não pôde ser mapeado. Verifique se os nomes das colunas correspondem (Proforma, Material, etc.).")
 
         if all_dfs:
-            # Concatena todos os arquivos processados em sequência
             df_final = pd.concat(all_dfs, ignore_index=True)
 
             st.success(f"Foram processados {len(uploaded_files)} arquivo(s) com sucesso! Total de linhas consolidadas: {len(df_final)}")
