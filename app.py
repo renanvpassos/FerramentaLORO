@@ -41,10 +41,9 @@ if uploaded_files:
             for idx, row in df_raw.iterrows():
                 for val in row.values:
                     if pd.notna(val):
-                        val_str = str(val).upper()
-                        # Verifica LORO (ou iniciado por loro) ou GOODS SHIPPED
+                        val_str = str(val).strip().upper()
                         if val_str.startswith("LORO") or "GOODS SHIPPED" in val_str:
-                            stop_points.append((idx, "GOODS SHIPPED" in val_str))
+                            stop_points.append(idx)
                             break
 
             # Processar blocos entre os cabeçalhos encontrados
@@ -60,7 +59,7 @@ if uploaded_files:
                     end_row = header_indices[i + 1]
                 
                 # Verificar se há alguma marca de parada (LORO ou GOODS SHIPPED) entre o start_row e o end_row
-                for s_idx, is_goods in stop_points:
+                for s_idx in stop_points:
                     if start_row <= s_idx < end_row:
                         end_row = s_idx
                         break
@@ -70,11 +69,15 @@ if uploaded_files:
 
                 # Extrai o sub-dataframe usando a linha h_idx como cabeçalho
                 df_bloco = df_raw.iloc[start_row:end_row].copy()
-                df_bloco.columns = df_raw.iloc[h_idx].values
+                
+                # Normaliza os nomes das colunas da linha de cabeçalho para evitar falhas por espaços
+                raw_headers = df_raw.iloc[h_idx].values
+                clean_headers = [str(col).strip() if pd.notna(col) else f"Unnamed_{c_idx}" for c_idx, col in enumerate(raw_headers)]
+                df_bloco.columns = clean_headers
 
                 def find_column(df, target):
                     for col in df.columns:
-                        if col and str(col).strip().lower() == target.strip().lower():
+                        if col and target.strip().lower() in str(col).strip().lower():
                             return col
                     return None
 
@@ -107,7 +110,7 @@ if uploaded_files:
                 df_file_final = pd.concat(dfs_arquivo, ignore_index=True)
                 all_dfs.append(df_file_final)
             else:
-                st.warning(f"O arquivo '{uploaded_file.name}' possui cabeçalhos, mas nenhum dado válido foi extraído entre os limites.")
+                st.warning(f"O arquivo '{uploaded_file.name}' possui cabeçalhos, mas os dados entre os limites estão vazios ou com nomes de colunas divergentes.")
 
         if all_dfs:
             df_final = pd.concat(all_dfs, ignore_index=True)
