@@ -15,70 +15,103 @@ if uploaded_files:
         
         for uploaded_file in uploaded_files:
             file_extension = uploaded_file.name.split('.')[-1].lower()
+            
+            # Carrega o arquivo sem cabeçalho fixo para permitirmos a identificação dinâmica de múltiplos headers
             if file_extension in ['xlsx', 'xls']:
-                df_origem = pd.read_excel(uploaded_file, header=13)
+                df_raw = pd.read_excel(uploaded_file, header=None)
             elif file_extension == 'csv':
-                df_origem = pd.read_csv(uploaded_file, header=13)
+                df_raw = pd.read_csv(uploaded_file, header=None)
             else:
                 st.warning(f"Formato não suportado para o arquivo: {uploaded_file.name}")
                 continue
 
-            def find_column(df, target):
-                for col in df.columns:
-                    if str(col).strip().lower() == target.strip().lower():
-                        return col
-                return None
+            # Função auxiliar para verificar valores em uma linha
+            def row_contains_terms(row, terms):
+                row_str_list = [str(val).strip().lower() for val in row.values if pd.notna(val)]
+                matches = sum(1 for term in terms if any(term in s for s in row_str_list))
+                return matches >= 2  # Considera cabeçalho se encontrar pelo menos 2 termos-chave
 
-            col_proforma = find_column(df_origem, "Proforma")
-            col_material = find_column(df_origem, "Material")
-            col_amount = find_column(df_origem, "amount in BRL")
-            col_weight = find_column(df_origem, "net weight in KG")
-            col_qty = find_column(df_origem, "Packed Quantity")
+            # Termos essenciais para identificar uma linha de cabeçalho
+            search_terms = ["proforma", "material", "amount in brl"]
 
-            missing_cols = []
-            if not col_proforma: missing_cols.append("Proforma")
-            if not col_material: missing_cols.append("Material")
-            if not col_amount: missing_cols.append("amount in BRL")
-            if not col_weight: missing_cols.append("net weight in KG")
-            if not col_qty: missing_cols.append("Packed Quantity")
+            # Identificar todas as linhas que atuam como cabeçalho
+            header_indices = []
+            for idx, row in df_raw.iterrows():
+                if row_contains_terms(row, search_terms):
+                    header_indices.append(idx)
 
-            if missing_cols:
-                st.error(f"O arquivo '{uploaded_file.name}' não possui as colunas: {', '.join(missing_cols)}")
-                st.stop()
+            # Se nenhum cabeçalho foi encontrado, tenta usar o comportamento padrão (ex: linha 13)
+            if not header_indices:
+                header_indices = [13] if len(df_raw) > 13 else [0]
 
-            # Filtrar para ignorar linhas a partir de onde aparece "GOODS SHIPPED INTO"
+            # Encontrar a linha de parada ("GOODS SHIPPED") global no arquivo
             stop_index = None
-            for idx, row in df_origem.iterrows():
+            for idx, row in df_raw.iterrows():
                 for val in row.values:
-                    if val and "GOODS SHIPPED INTO" in str(val).upper():
+                    if val and "GOODS SHIPPED" in str(val).upper():
                         stop_index = idx
                         break
                 if stop_index is not None:
                     break
-            
-            if stop_index is not None:
-                df_origem_filtrado = df_origem.iloc[:stop_index].copy()
+
+            # Processar blocos entre os cabeçalhos encontrados
+            dfs_arquivo = []
+            for i, h_idx in enumerate(header_indices):
+                # Onde o bloco começa (linha seguinte ao cabeçalho)
+                start_row = h_idx + 1
+                
+                # Onde o bloco termina (próximo cabeçalho ou o limite de 'GOODS SHIPPED')
+                if i + 1 < len(header_indices):
+                    end_row = header_indices[i + 1]
+                else:
+                    end_row = stop_index if stop_index is not None else len(df_raw)
+
+                if start_row >= end_row:
+                    continue
+
+                # Extrai o sub-dataframe usando a linha h_idx como cabeçalho
+                df_bloco = df_raw.iloc[start_row:end_row].copy()
+                df_bloco.columns = df_raw.iloc[h_idx].values
+
+                def find_column(df, target):
+                    for col in df.columns:
+                        if col and str(col).strip().lower() == target.strip().lower():
+                            return col
+                    return None
+
+                col_proforma = find_column(df_bloco, "Proforma")
+                col_material = find_column(df_bloco, "Material")
+                col_amount = find_column(df_bloco, "amount in BRL")
+                col_weight = find_column(df_bloco, "net weight in KG")
+                col_qty = find_column(df_bloco, "Packed Quantity")
+
+                if not (col_proforma and col_material and col_amount and col_weight and col_qty):
+                    continue  # Pula blocos que não contenham todas as colunas necessárias
+
+                df_novo = pd.DataFrame()
+                df_novo["invoice"] = df_bloco[col_proforma]
+                df_novo["partnumber"] = df_bloco[col_material]
+                df_novo["precototal"] = df_bloco[col_amount]
+                df_novo["pesototal"] = df_bloco[col_weight]
+                df_novo["quantidade"] = df_bloco[col_qty]
+                df_novo["MOEDA"] = 790
+                df_novo["INCOTERMS"] = "FCA"
+
+                # Remove linhas totalmente vazias ou que repetem o texto do cabeçalho
+                df_novo = df_novo.dropna(subset=["invoice", "partnumber"], how="all")
+                df_novo = df_novo[~df_novo["partnumber"].astype(str).str.lower().str.contains("material")]
+
+                if not df_novo.empty:
+                    dfs_arquivo.append(df_novo)
+
+            if dfs_arquivo:
+                df_file_final = pd.concat(dfs_arquivo, ignore_index=True)
+                all_dfs.append(df_file_final)
             else:
-                df_origem_filtrado = df_origem.copy()
-
-            # Cria o DataFrame estruturado para este arquivo
-            df_novo = pd.DataFrame()
-            df_novo["invoice"] = df_origem_filtrado[col_proforma]
-            df_novo["partnumber"] = df_origem_filtrado[col_material]
-            df_novo["precototal"] = df_origem_filtrado[col_amount]
-            df_novo["pesototal"] = df_origem_filtrado[col_weight]
-            df_novo["quantidade"] = df_origem_filtrado[col_qty]
-            df_novo["MOEDA"] = 790
-            df_novo["INCOTERMS"] = "FCA"
-
-            # Remove linhas totalmente vazias para evitar espaçamento
-            df_novo = df_novo.dropna(subset=["invoice", "partnumber"], how="all")
-            
-            if not df_novo.empty:
-                all_dfs.append(df_novo)
+                st.warning(f"O arquivo '{uploaded_file.name}' não pôde ser mapeado corretamente com os cabeçalhos encontrados.")
 
         if all_dfs:
-            # Concatena todos os dataframes em sequência, sem pular linhas
+            # Concatena todos os arquivos processados em sequência
             df_final = pd.concat(all_dfs, ignore_index=True)
 
             st.success(f"Foram processados {len(uploaded_files)} arquivo(s) com sucesso! Total de linhas consolidadas: {len(df_final)}")
