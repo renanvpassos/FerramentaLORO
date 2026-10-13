@@ -25,42 +25,45 @@ if uploaded_files:
                 st.warning(f"Formato não suportado para o arquivo: {uploaded_file.name}")
                 continue
 
-            # Função mais flexível para identificar linhas de cabeçalho
-            def is_header_row(row):
-                row_str = " ".join([str(val).strip().lower() for val in row.values if pd.notna(val)])
-                # Se a linha contiver os identificadores principais das colunas, é um cabeçalho
-                return "proforma" in row_str or "material" in row_str
-
-            # Identificar todas as linhas que atuam como cabeçalho
+            # Identificar todas as linhas onde a Coluna A (índice 0) contém "Proforma"
             header_indices = []
             for idx, row in df_raw.iterrows():
-                if is_header_row(row):
+                val_col_a = str(row.iloc[0]).strip().lower() if pd.notna(row.iloc[0]) else ""
+                if "proforma" in val_col_a:
                     header_indices.append(idx)
 
-            # Fallback de segurança: se não achar pelo texto, assume a linha 13 (padrão antigo) ou o início
             if not header_indices:
-                header_indices = [13] if len(df_raw) > 13 else [0]
+                st.warning(f"O arquivo '{uploaded_file.name}' não possui nenhum cabeçalho com 'Proforma' na Coluna A.")
+                continue
 
-            # Encontrar a linha de parada ("GOODS SHIPPED") global no arquivo
-            stop_index = None
+            # Mapear linhas de parada globais no arquivo (LORO... e GOODS SHIPPED)
+            stop_points = []
             for idx, row in df_raw.iterrows():
                 for val in row.values:
-                    if val and "GOODS SHIPPED" in str(val).upper():
-                        stop_index = idx
-                        break
-                if stop_index is not None:
-                    break
+                    if pd.notna(val):
+                        val_str = str(val).upper()
+                        # Verifica LORO (ou iniciado por loro) ou GOODS SHIPPED
+                        if val_str.startswith("LORO") or "GOODS SHIPPED" in val_str:
+                            stop_points.append((idx, "GOODS SHIPPED" in val_str))
+                            break
 
             # Processar blocos entre os cabeçalhos encontrados
             dfs_arquivo = []
             for i, h_idx in enumerate(header_indices):
                 start_row = h_idx + 1
                 
-                # O bloco termina no próximo cabeçalho ou no limite de parada ("GOODS SHIPPED")
+                # Definir o limite de parada para este bloco específico
+                end_row = len(df_raw)
+                
+                # Se houver um próximo cabeçalho, o bloco atual cessa antes dele
                 if i + 1 < len(header_indices):
                     end_row = header_indices[i + 1]
-                else:
-                    end_row = stop_index if stop_index is not None else len(df_raw)
+                
+                # Verificar se há alguma marca de parada (LORO ou GOODS SHIPPED) entre o start_row e o end_row
+                for s_idx, is_goods in stop_points:
+                    if start_row <= s_idx < end_row:
+                        end_row = s_idx
+                        break
 
                 if start_row >= end_row:
                     continue
@@ -104,7 +107,7 @@ if uploaded_files:
                 df_file_final = pd.concat(dfs_arquivo, ignore_index=True)
                 all_dfs.append(df_file_final)
             else:
-                st.warning(f"O arquivo '{uploaded_file.name}' não pôde ser mapeado. Verifique se os nomes das colunas correspondem (Proforma, Material, etc.).")
+                st.warning(f"O arquivo '{uploaded_file.name}' possui cabeçalhos, mas nenhum dado válido foi extraído entre os limites.")
 
         if all_dfs:
             df_final = pd.concat(all_dfs, ignore_index=True)
