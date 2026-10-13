@@ -42,7 +42,7 @@ if uploaded_files:
                 for val in row.values:
                     if pd.notna(val):
                         val_str = str(val).strip().upper()
-                        if val_str.startswith("LORO") or "GOODS SHIPPED" in val_str:
+                        if val_str.startswith("LORO PIANA S.p.A.") or "GOODS SHIPPED" in val_str:
                             stop_points.append(idx)
                             break
 
