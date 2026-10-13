@@ -5,7 +5,7 @@ import io
 
 st.set_page_config(page_title="Processador de Planilhas", page_icon="📊", layout="centered")
 
-st.title("📊 Tratador de Planilhas Loro")
+st.title("📊 Processador de Múltiplas Planilhas para Importação")
 st.markdown("Faça o upload de uma ou mais planilhas de origem.")
 
 uploaded_files = st.file_uploader("Envie as planilhas de origem (Excel ou CSV)", type=["xlsx", "xls", "csv"], accept_multiple_files=True)
@@ -68,7 +68,6 @@ if uploaded_files:
                 clean_headers = [str(col).strip() if pd.notna(col) else f"Unnamed_{c_idx}" for c_idx, col in enumerate(raw_headers)]
                 df_bloco.columns = clean_headers
 
-                # Função robusta que ignora quebras de linha, espaços extras e diferenças de maiúsculas/minúsculas
                 def find_column(df, target):
                     target_clean = re.sub(r'\s+', '', target).lower()
                     for col in df.columns:
@@ -84,11 +83,16 @@ if uploaded_files:
                 col_qty = find_column(df_bloco, "Packed Quantity")
 
                 if not (col_proforma and col_material and col_amount and col_weight and col_qty):
-                    continue  # Pula blocos vazios ou inválidos sem travar
+                    continue  
 
                 df_novo = pd.DataFrame()
                 df_novo["invoice"] = df_bloco[col_proforma]
-                df_novo["partnumber"] = df_bloco[col_material]
+                
+                # Tratamento do Material: substitui os múltiplos espaços entre letras por 4x " - "
+                # Ex: "F     FAL..." vira "F -  -  -  -FAL..." (ou ajustado conforme desejado)
+                raw_material = df_bloco[col_material].astype(str)
+                df_novo["partnumber"] = raw_material.apply(lambda x: re.sub(r'([A-Za-z])\s+([A-Za-z])', r'\1 -  -  -  -\2', x) if pd.notna(x) else x)
+
                 df_novo["precototal"] = df_bloco[col_amount]
                 df_novo["pesototal"] = df_bloco[col_weight]
                 df_novo["quantidade"] = df_bloco[col_qty]
@@ -96,7 +100,7 @@ if uploaded_files:
                 df_novo["INCOTERMS"] = "FCA"
 
                 df_novo = df_novo.dropna(subset=["invoice", "partnumber"], how="all")
-                df_novo = df_novo[~df_novo["partnumber"].astype(str).str.lower().str.contains("material")]
+                df_novo = df_novo[~df_novo["partnumber"].str.lower().str.contains("material")]
 
                 if not df_novo.empty:
                     dfs_arquivo.append(df_novo)
