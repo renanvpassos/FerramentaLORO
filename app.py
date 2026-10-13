@@ -5,7 +5,7 @@ import io
 
 st.set_page_config(page_title="Processador de Planilhas", page_icon="📊", layout="centered")
 
-st.title("📊 Processador de Múltiplas Planilhas para Importação")
+st.title("📊 Tratador de Planilhas")
 st.markdown("Faça o upload de uma ou mais planilhas de origem.")
 
 uploaded_files = st.file_uploader("Envie as planilhas de origem (Excel ou CSV)", type=["xlsx", "xls", "csv"], accept_multiple_files=True)
