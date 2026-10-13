@@ -88,10 +88,9 @@ if uploaded_files:
                 df_novo = pd.DataFrame()
                 df_novo["invoice"] = df_bloco[col_proforma]
                 
-                # Tratamento do Material: substitui os múltiplos espaços entre letras por 4x " - "
-                # Ex: "F     FAL..." vira "F -  -  -  -FAL..." (ou ajustado conforme desejado)
+                # Tratamento do Material: substitui os múltiplos espaços entre letras por 4 traços colados (----)
                 raw_material = df_bloco[col_material].astype(str)
-                df_novo["partnumber"] = raw_material.apply(lambda x: re.sub(r'([A-Za-z])\s+([A-Za-z])', r'\1 -  -  -  -\2', x) if pd.notna(x) else x)
+                df_novo["partnumber"] = raw_material.apply(lambda x: re.sub(r'([A-Za-z])\s+([A-Za-z])', r'\1----\2', x) if pd.notna(x) else x)
 
                 df_novo["precototal"] = df_bloco[col_amount]
                 df_novo["pesototal"] = df_bloco[col_weight]
